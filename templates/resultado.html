@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Resultado</title>
+</head>
+<body>
+    <h1>Imagen Procesada</h1>
+    {% if imagen_resultado %}
+        <img src="{{ imagen_resultado }}" alt="Imagen Procesada">
+    {% else %}
+        <p>Error al procesar la imagen</p>
+    {% endif %}
+</body>
+</html>

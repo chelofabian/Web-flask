@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Aplicación de Enmascaramiento de Imágenes</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Custom styles if needed, but prefer Tailwind classes */
+        body {
+            font-family: 'Inter', sans-serif; /* A common, clean font */
+        }
+        /* Ensure canvas drawing is sharp */
+        #mask-canvas {
+            image-rendering: -moz-crisp-edges;
+            image-rendering: -webkit-crisp-edges;
+            image-rendering: pixelated;
+            image-rendering: crisp-edges;
+            touch-action: none; /* Prevents scrolling on touch devices when drawing */
+        }
+        /* Custom file input styling */
+        .custom-file-input::-webkit-file-upload-button {
+            visibility: hidden;
+        }
+        .custom-file-input::before {
+            content: 'Seleccionar archivo';
+            display: inline-block;
+            background: #4f46e5; /* Indigo-600 */
+            color: white;
+            border-radius: 0.375rem; /* rounded-md */
+            padding: 0.5rem 1rem; /* py-2 px-4 */
+            outline: none;
+            white-space: nowrap;
+            cursor: pointer;
+            font-weight: 500; /* medium */
+            margin-right: 0.75rem; /* mr-3 */
+        }
+        .custom-file-input:hover::before {
+            background: #4338ca; /* Indigo-700 */
+        }
+        .custom-file-input:active::before {
+            background: #3730a3; /* Indigo-800 */
+        }
+        /* Style for the selected file name (optional) */
+        #file-chosen {
+            font-style: italic;
+            color: #6b7280; /* Gray-500 */
+        }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800 min-h-screen flex flex-col items-center justify-center p-4">
+
+    <div class="container bg-white shadow-xl rounded-lg p-6 md:p-8 w-full max-w-2xl">
+        <header class="mb-6 text-center">
+            <h1 class="text-2xl md:text-3xl font-bold text-indigo-600">Restaurador de imagenes</h1>
+            <p class="text-gray-600 mt-1">Sube una imagen y dibuja una máscara sobre las áreas dañadas.</p>
+        </header>
+
+        <form id="upload-form" action="/upload" method="post" enctype="multipart/form-data" class="space-y-6">
+            <div>
+                <label for="image-input" class="block text-sm font-medium text-gray-700 mb-1">Subir Imagen:</label>
+                <input type="file" name="image" accept="image/*" required id="image-input" class="custom-file-input text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100">
+                <span id="file-chosen" class="text-sm text-gray-500 ml-2">Ningún archivo seleccionado</span>
+            </div>
+
+            <div class="brush-controls bg-gray-50 p-4 rounded-md shadow-sm">
+                <label for="brush-size-slider" class="block text-sm font-medium text-gray-700 mb-2">Tamaño del Pincel:</label>
+                <div class="flex items-center space-x-3">
+                    <input type="range" id="brush-size-slider" min="1" max="100" value="25" class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-indigo-600">
+                    <span id="brush-size-display" class="text-sm font-semibold text-indigo-600 bg-indigo-100 px-2 py-1 rounded-md min-w-[40px] text-center">25</span>
+                    <span class="text-sm text-gray-600">px</span>
+                </div>
+            </div>
+
+            <div class="canvas-container w-full overflow-hidden rounded-md shadow-sm border border-gray-300">
+                 <p id="canvas-placeholder" class="text-gray-500 text-center py-10">Por favor, sube una imagen para activar el lienzo.</p>
+                <canvas id="mask-canvas" class="cursor-crosshair block max-w-full h-auto"></canvas>
+            </div>
+            <input type="hidden" name="mask" id="mask-data">
+
+            <button type="submit" id="submit-mask" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-3 px-4 rounded-md shadow-md transition duration-150 ease-in-out focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-opacity-50 disabled:opacity-50" disabled>
+                Enviar Máscara
+            </button>
+        </form>
+
+        <div id="message-area" class="mt-4 text-center"></div>
+    </div>
+
+    <script>
+        const imageInput = document.getElementById('image-input');
+        const canvas = document.getElementById('mask-canvas');
+        const ctx = canvas.getContext('2d');
+        const brushSizeSlider = document.getElementById('brush-size-slider');
+        const brushSizeDisplay = document.getElementById('brush-size-display');
+        const maskDataInput = document.getElementById('mask-data');
+        const uploadForm = document.getElementById('upload-form');
+        const submitButton = document.getElementById('submit-mask');
+        const fileChosenText = document.getElementById('file-chosen');
+        const canvasPlaceholder = document.getElementById('canvas-placeholder');
+
+        let drawing = false;
+        let maskMatrix = [];
+        let brushRadius = parseInt(brushSizeSlider.value, 10);
+        let originalImage = null;
+        let canvasVisible = false;
+
+        // Initially hide canvas and disable submit button
+        canvas.style.display = 'none';
+        submitButton.disabled = true;
+
+
+        brushSizeSlider.addEventListener('input', function() {
+            brushRadius = parseInt(this.value, 10);
+            brushSizeDisplay.textContent = brushRadius;
+        });
+
+        imageInput.addEventListener('change', function(event) {
+            const file = event.target.files[0];
+            if (!file) {
+                fileChosenText.textContent = 'Ningún archivo seleccionado';
+                if (originalImage) { // If an image was previously loaded
+                    clearCanvasAndReset();
+                }
+                return;
+            }
+            fileChosenText.textContent = file.name;
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const img = new Image();
+                img.onload = function() {
+                    // Set canvas intrinsic size to image size for 1:1 drawing
+                    canvas.width = img.width;
+                    canvas.height = img.height;
+
+                    // Style canvas for responsive display
+                    canvas.style.maxWidth = '100%';
+                    canvas.style.height = 'auto'; // Maintain aspect ratio
+                    canvas.style.display = 'block'; // Make it visible
+                    canvasPlaceholder.style.display = 'none'; // Hide placeholder
+
+                    originalImage = img;
+                    ctx.clearRect(0, 0, canvas.width, canvas.height); // Clear previous drawing
+                    ctx.drawImage(img, 0, 0, canvas.width, canvas.height); // Draw image as background
+                    
+                    // Initialize maskMatrix with the correct dimensions
+                    maskMatrix = Array.from({ length: img.height }, () => Array(img.width).fill(0));
+                    
+                    submitButton.disabled = false; // Enable submit button
+                    canvasVisible = true;
+                    showMessage(''); // Clear any previous messages
+                };
+                img.onerror = function() {
+                    showMessage('Error: No se pudo cargar el archivo de imagen. Por favor, intenta con otro formato.', 'error');
+                    clearCanvasAndReset();
+                }
+                img.src = e.target.result;
+            };
+            reader.onerror = function() {
+                showMessage('Error: No se pudo leer el archivo.', 'error');
+                clearCanvasAndReset();
+            }
+            reader.readAsDataURL(file);
+        });
+
+        function clearCanvasAndReset() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            canvas.style.display = 'none';
+            canvasPlaceholder.style.display = 'block';
+            originalImage = null;
+            maskMatrix = [];
+            submitButton.disabled = true;
+            canvasVisible = false;
+            fileChosenText.textContent = 'Ningún archivo seleccionado';
+            imageInput.value = ''; // Reset file input
+        }
+
+        function getMousePos(canvasEl, evt) {
+            const rect = canvasEl.getBoundingClientRect();
+            // Calculate scale based on intrinsic size vs displayed size
+            const scaleX = canvasEl.width / rect.width;
+            const scaleY = canvasEl.height / rect.height;
+
+            // For touch events, get the first touch point
+            const clientX = evt.touches ? evt.touches[0].clientX : evt.clientX;
+            const clientY = evt.touches ? evt.touches[0].clientY : evt.clientY;
+            
+            return {
+                x: Math.floor((clientX - rect.left) * scaleX),
+                y: Math.floor((clientY - rect.top) * scaleY)
+            };
+        }
+
+        function applyBrush(mouseX, mouseY) {
+            if (!originalImage || !canvasVisible) return;
+
+            // Draw semi-transparent red circle for visual feedback
+            ctx.fillStyle = 'rgba(255, 0, 0, 0.4)'; // Red with alpha for transparency
+            ctx.beginPath();
+            ctx.arc(mouseX, mouseY, brushRadius, 0, Math.PI * 2, false);
+            ctx.fill();
+
+            // Update the maskMatrix
+            // Iterate over a square bounding box around the circle
+            for (let yOffset = -brushRadius; yOffset <= brushRadius; yOffset++) {
+                for (let xOffset = -brushRadius; xOffset <= brushRadius; xOffset++) {
+                    // Check if the point (xOffset, yOffset) is within the circle
+                    if (xOffset * xOffset + yOffset * yOffset <= brushRadius * brushRadius) {
+                        const currentX = mouseX + xOffset;
+                        const currentY = mouseY + yOffset;
+
+                        // Check bounds for maskMatrix
+                        if (currentY >= 0 && currentY < originalImage.height && currentX >= 0 && currentX < originalImage.width) {
+                             // Ensure maskMatrix[currentY] exists before trying to assign to maskMatrix[currentY][currentX]
+                            if (maskMatrix[currentY]) {
+                                maskMatrix[currentY][currentX] = 1; // Mark as part of the mask
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        function startDrawing(event) {
+            if (!originalImage || !canvasVisible) return;
+            event.preventDefault(); // Prevent page scroll on touch
+            drawing = true;
+            const mousePos = getMousePos(canvas, event);
+            applyBrush(mousePos.x, mousePos.y);
+        }
+
+        function draw(event) {
+            if (!drawing || !originalImage || !canvasVisible) return;
+            event.preventDefault();
+            const mousePos = getMousePos(canvas, event);
+            applyBrush(mousePos.x, mousePos.y);
+        }
+
+        function stopDrawing() {
+            drawing = false;
+        }
+
+        // Mouse events
+        canvas.addEventListener('mousedown', startDrawing);
+        canvas.addEventListener('mousemove', draw);
+        canvas.addEventListener('mouseup', stopDrawing);
+        canvas.addEventListener('mouseleave', stopDrawing); // Stop drawing if mouse leaves canvas
+
+        // Touch events
+        canvas.addEventListener('touchstart', startDrawing);
+        canvas.addEventListener('touchmove', draw);
+        canvas.addEventListener('touchend', stopDrawing);
+        canvas.addEventListener('touchcancel', stopDrawing);
+
+
+        uploadForm.addEventListener('submit', function(e) {
+            if (!originalImage) {
+                e.preventDefault(); // Prevent submission if no image
+                showMessage('Por favor, sube una imagen primero.', 'error');
+                return;
+            }
+            // Ensure maskMatrix is initialized if it somehow wasn't (e.g., no drawing occurred)
+            if (maskMatrix.length === 0 && originalImage) {
+                 maskMatrix = Array.from({length: originalImage.height}, () => Array(originalImage.width).fill(0));
+            }
+            maskDataInput.value = JSON.stringify(maskMatrix);
+            // The form will now submit
+        });
+
+        function showMessage(message, type = 'info') {
+            const messageArea = document.getElementById('message-area');
+            messageArea.textContent = message;
+            if (type === 'error') {
+                messageArea.className = 'mt-4 text-center text-red-600 font-medium p-3 bg-red-100 rounded-md';
+            } else if (type === 'success') {
+                messageArea.className = 'mt-4 text-center text-green-600 font-medium p-3 bg-green-100 rounded-md';
+            } else {
+                messageArea.className = 'mt-4 text-center text-gray-600 p-3 bg-gray-100 rounded-md';
+            }
+        }
+
+    </script>
+</body>
+</html>
