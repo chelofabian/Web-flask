@@ -1,16 +1,41 @@
-<!doctype html>
-<html lang="en">
+<!DOCTYPE html>
+<html lang="es">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Resultado</title>
+    <title>Resultado del Procesamiento</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+    </style>
 </head>
-<body>
-    <h1>Imagen Procesada</h1>
-    {% if imagen_resultado %}
-        <img src="{{ imagen_resultado }}" alt="Imagen Procesada">
-    {% else %}
-        <p>Error al procesar la imagen</p>
-    {% endif %}
+<body class="bg-gray-100 text-gray-800 min-h-screen flex flex-col items-center justify-center p-4">
+
+    <div class="container bg-white shadow-xl rounded-lg p-6 md:p-8 w-full max-w-2xl text-center">
+        <header class="mb-6">
+            <h1 class="text-2xl md:text-3xl font-bold text-indigo-600">Imagen Restaurada</h1>
+        </header>
+
+        <div class="result-image-container mb-6">
+            {% if imagen_resultado %}
+                <p class="text-gray-600 mb-4">Este es el resultado de la restauración.</p>
+                <img src="{{ imagen_resultado }}" alt="Imagen Procesada" class="max-w-full h-auto mx-auto rounded-md shadow-md border border-gray-200">
+            {% else %}
+                <div class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded-md" role="alert">
+                    <strong class="font-bold">Error:</strong>
+                    <span class="block sm:inline">No se pudo procesar la imagen. Por favor, inténtalo de nuevo.</span>
+                </div>
+            {% endif %}
+        </div>
+
+        <div class="mt-8">
+            <a href="/" class="w-full sm:w-auto inline-block bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-3 px-6 rounded-md shadow-md transition duration-150 ease-in-out focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-opacity-50">
+                Procesar Otra Imagen
+            </a>
+        </div>
+    </div>
+
 </body>
 </html>
